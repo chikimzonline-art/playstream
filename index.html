@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StreamLinker Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: white; scroll-behavior: smooth; }
+        .card:hover { transform: translateY(-5px); transition: 0.3s; }
+        .favorite-active { color: #ef4444 !important; }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-4 gap-8">
+        
+        <div class="lg:col-span-3">
+            <h1 class="text-3xl font-bold mb-6 text-blue-400 flex items-center gap-2">
+                <span>🎬</span> StreamLinker
+            </h1>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                <input id="apiKey" type="password" placeholder="TMDB API Key" 
+                    class="bg-slate-800 border border-slate-700 p-3 rounded text-white focus:outline-none focus:border-blue-500">
+                <div class="flex gap-2">
+                    <input id="searchQuery" type="text" placeholder="Search Movie or TV..." 
+                        class="bg-slate-800 border border-slate-700 p-3 rounded text-white flex-grow focus:outline-none focus:border-blue-500">
+                    <button onclick="search()" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded font-bold">Search</button>
+                </div>
+            </div>
+
+            <h2 class="text-xl font-semibold mb-4 text-slate-400">Search Results</h2>
+            <div id="results" class="grid grid-cols-2 md:grid-cols-3 gap-6"></div>
+        </div>
+
+        <div class="bg-slate-900/50 p-6 rounded-xl border border-slate-800 h-fit sticky top-8">
+            <h2 class="text-xl font-bold mb-4 flex items-center gap-2 text-red-400">
+                <span>❤️</span> My Favorites
+            </h2>
+            <div id="favoritesList" class="space-y-4 max-h-[70vh] overflow-y-auto pr-2 text-sm text-slate-300">
+                <p class="italic text-slate-500 text-center py-4">No favorites yet.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="tvModal" class="fixed inset-0 bg-black/90 hidden items-center justify-center p-4 z-50">
+        <div class="bg-slate-900 p-6 rounded-lg max-w-sm w-full border border-slate-700">
+            <h2 id="modalTitle" class="text-xl font-bold mb-4 uppercase tracking-wide">TV Show</h2>
+            <div class="space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1 italic">Season</label>
+                        <input id="seasonNum" type="number" value="1" min="1" class="w-full bg-slate-800 p-2 rounded border border-slate-700">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1 italic">Episode</label>
+                        <input id="episodeNum" type="number" value="1" min="1" class="w-full bg-slate-800 p-2 rounded border border-slate-700">
+                    </div>
+                </div>
+                <button id="generateTvBtn" class="w-full bg-blue-600 hover:bg-blue-700 p-3 rounded font-bold mt-2 transition">Launch Player</button>
+                <button onclick="closeModal()" class="w-full text-slate-500 text-sm py-2">Go Back</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let favorites = JSON.parse(localStorage.getItem('stream_favorites')) || [];
+        const resultsDiv = document.getElementById('results');
+        const favoritesDiv = document.getElementById('favoritesList');
+        const tvModal = document.getElementById('tvModal');
+
+        // Render favorites on load
+        updateFavoritesUI();
+
+        async function search() {
+            const key = document.getElementById('apiKey').value;
+            const query = document.getElementById('searchQuery').value;
+            if(!key) return alert("Please enter your TMDB API Key");
+            
+            resultsDiv.innerHTML = '<p class="col-span-full text-center py-10 opacity-50">Searching the archives...</p>';
+
+            try {
+                const res = await fetch(`https://api.themoviedb.org/3/search/multi?api_key=${key}&query=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                renderResults(data.results);
+            } catch (err) {
+                resultsDiv.innerHTML = `<p class="col-span-full text-red-400">Error: ${err.message}</p>`;
+            }
+        }
+
+        function renderResults(items) {
+            resultsDiv.innerHTML = '';
+            items.forEach(item => {
+                if (item.media_type !== 'movie' && item.media_type !== 'tv') return;
+
+                const isFav = favorites.some(f => f.id === item.id);
+                const poster = item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : 'https://via.placeholder.com/500x750?text=No+Poster';
+                const title = item.title || item.name;
+                
+                const card = document.createElement('div');
+                card.className = "card bg-slate-800 rounded-lg overflow-hidden border border-slate-700 relative group";
+                card.innerHTML = `
+                    <div class="relative overflow-hidden cursor-pointer" onclick='handleSelection(${JSON.stringify(item).replace(/'/g, "&apos;")})'>
+                        <img src="${poster}" class="w-full h-72 object-cover">
+                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center font-bold">▶ Play</div>
+                    </div>
+                    <div class="p-3 flex justify-between items-start">
+                        <div class="w-4/5">
+                            <p class="font-bold truncate text-sm">${title}</p>
+                            <p class="text-[10px] text-slate-500 uppercase font-semibold">${item.media_type}</p>
+                        </div>
+                        <button onclick="toggleFavorite(${item.id}, '${title.replace(/'/g, "\\'")}', '${item.media_type}', '${item.poster_path}')" 
+                                class="text-slate-500 hover:text-red-400 transition text-xl ${isFav ? 'favorite-active' : ''}">
+                            ❤
+                        </button>
+                    </div>
+                `;
+                resultsDiv.appendChild(card);
+            });
+        }
+
+        function toggleFavorite(id, title, type, poster) {
+            const index = favorites.findIndex(f => f.id === id);
+            if (index > -1) {
+                favorites.splice(index, 1);
+            } else {
+                favorites.unshift({ id, title, type, poster });
+            }
+            localStorage.setItem('stream_favorites', JSON.stringify(favorites));
+            updateFavoritesUI();
+            // Re-render search results to update hearts if they are visible
+            const query = document.getElementById('searchQuery').value;
+            if(query) search(); 
+        }
+
+        function updateFavoritesUI() {
+            if (favorites.length === 0) {
+                favoritesDiv.innerHTML = '<p class="italic text-slate-500 text-center py-4">No favorites yet.</p>';
+                return;
+            }
+
+            favoritesDiv.innerHTML = favorites.map(f => `
+                <div class="flex items-center gap-3 bg-slate-800/50 p-2 rounded border border-slate-700/50 group">
+                    <img src="https://image.tmdb.org/t/p/w92${f.poster}" class="w-10 h-14 object-cover rounded shadow-lg border border-slate-600 cursor-pointer" onclick='handleSelection(${JSON.stringify(f)})'>
+                    <div class="flex-grow min-w-0">
+                        <p class="font-bold truncate cursor-pointer hover:text-blue-400" onclick='handleSelection(${JSON.stringify(f)})'>${f.title}</p>
+                        <p class="text-[9px] uppercase text-slate-500">${f.type}</p>
+                    </div>
+                    <button onclick="toggleFavorite(${f.id})" class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-500 transition px-2 text-lg">×</button>
+                </div>
+            `).join('');
+        }
+
+        function handleSelection(item) {
+            const type = item.media_type || item.type;
+            if (type === 'movie') {
+                window.open(`https://vixsrc.to/movie/${item.id}`, '_blank');
+            } else {
+                document.getElementById('modalTitle').innerText = item.title || item.name;
+                tvModal.classList.remove('hidden');
+                tvModal.classList.add('flex');
+                
+                document.getElementById('generateTvBtn').onclick = () => {
+                    const s = document.getElementById('seasonNum').value;
+                    const e = document.getElementById('episodeNum').value;
+                    window.open(`https://vixsrc.to/tv/${item.id}/${s}/${e}`, '_blank');
+                };
+            }
+        }
+
+        function closeModal() {
+            tvModal.classList.add('hidden');
+            tvModal.classList.remove('flex');
+        }
+    </script>
+</body>
+</html>
